@@ -31,8 +31,7 @@ class TriggerOnObjectUpdate extends TriggerOnObject
 
 class TriggerOnObjectUpdatePlugIn implements iApplicationObjectExtension
 {
-    //private $check_id = 0;
-    private $aChangedAttcodes = [];
+    private $aChangedAttCodes = [];
 
     public function OnIsModified($oObject)
     {
@@ -40,12 +39,9 @@ class TriggerOnObjectUpdatePlugIn implements iApplicationObjectExtension
     }
     public function OnCheckToWrite($oObject)
     {
-        //$this->check_id += 1;
-        //IssueLog::Info('check ' . $this->check_id);
-        $aNewAttcodes = array_fill_keys(array_keys($oObject->ListChanges()), true);
-        //IssueLog::Info('aNewAttcodes: ' . var_export($aNewAttcodes, true));
-        $this->aChangedAttcodes = array_merge($aNewAttcodes, $this->aChangedAttcodes);
-        //IssueLog::Info('aChangedAttcodes: ' . var_export($this->aChangedAttcodes, true));
+        // See comment to OnDBUpdate bellow to figure it out:
+        $aNewAttCodes = array_fill_keys(array_keys($oObject->ListChanges()), true);
+        $this->aChangedAttCodes = array_merge($aNewAttCodes, $this->aChangedAttCodes);
         return array();
     }
     public function OnCheckToDelete($oObject)
@@ -54,28 +50,28 @@ class TriggerOnObjectUpdatePlugIn implements iApplicationObjectExtension
     }
 
     /**
+     * OnDBUpdate can be called multiple times for one real update and each time it adds new attcodes.
+     * On each iteration we collect attcodes and mark them as triggered to prevent re-trigger on the same attcodes.
+     * ListChanges doesn't work inside OnDBUpdate (don't know why). So we get changed attcodes inside OnCheckToWrite,
+     * because it's called at least once for every OnDBUpdate and ListChanges works inside it.
      *
-     * ListChanges не работает внутри OnDBUpdate (хз почему, не стал копать).
      * @param DBObject $oObject
      * @param null $oChange
      */
     public function OnDBUpdate($oObject, $oChange = null)
     {
         if (!is_object($oChange)) return;
-        //IssueLog::Info('update '.$this->check_id);
-        $aFilteredAttcodes = array_keys(array_filter($this->aChangedAttcodes)); // select only 'attcode' => true
-        //IssueLog::Info('aFilteredAttcodes: ' . var_export($aFilteredAttcodes, true));
+        $aFilteredAttcodes = array_keys(array_filter($this->aChangedAttCodes)); // select only 'attcode' => true
         if (empty($aFilteredAttcodes)) return;
-        array_walk($this->aChangedAttcodes, function (&$item) { $item = false; });
-        //IssueLog::Info('aChangedAttcodes: ' . var_export($this->aChangedAttcodes, true));
+        array_walk($this->aChangedAttCodes, function (&$item) { $item = false; });
         $sClassList = implode("', '", MetaModel::EnumParentClasses(get_class($oObject), ENUM_PARENT_CLASSES_ALL));
-        $sRegExp = '^ *$|' . implode('|', $aFilteredAttcodes); // '^ *$' - regexp для пустого поля tracked_attcodes (именно с пробелом)
+        $sRegExp = '^ *$|' . implode('|', $aFilteredAttcodes); // '^ *$' - regexp for an empty tracked_attcodes (exactly with space!)
         $oSet = new DBObjectSet(DBObjectSearch::FromOQL("SELECT TriggerOnObjectUpdate WHERE target_class IN ('$sClassList') AND tracked_attcodes REGEXP '$sRegExp'"));
         if ($oSet->Count() > 0) {
-            $aChangeLog = array(); // лог изменения как в истории
-            $aContextArgs = array(); // аргументы контекста для использования в уведомлении в виде $change->html(log)$
+            $aChangeLog = array(); // change log like in ticket's history
+            $aContextArgs = array(); // context arguments to use in notifications as placeholders $change->html(log)$
             $oFilter = DBObjectSearch::FromOQL("SELECT CMDBChangeOpSetAttribute WHERE attcode IN ('" . implode("','", $aFilteredAttcodes) . "')");
-            // $oFilter->AddCondition('attcode', $aFilteredAttcodes, 'IN'); // так бросает exception, а через OQL выше работает
+            // $oFilter->AddCondition('attcode', $aFilteredAttcodes, 'IN'); // it throws an exception, but works in OQL above
             $oFilter->AddCondition('objkey', $oObject->GetKey(), '=');
             $oFilter->AddCondition('objclass', get_class($oObject), '=');
             $oFilter->AddCondition('change', $oChange->GetKey(), '=');
